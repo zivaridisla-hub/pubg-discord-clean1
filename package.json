@@ -1,18 +1,16 @@
 {
-  "name": "pubg_stats_monitor_bot",
+  "name": "pubg-discord-clean1",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
-    "axios": "^1.16.1",
-    "discord.js": "^14.26.4",
-    "dotenv": "^17.4.2"
+    "discord.js": "^14.0.0",
+    "dotenv": "^16.0.0",
+    "express": "^5.2.1"
   }
 }

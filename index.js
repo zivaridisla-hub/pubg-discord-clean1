@@ -1,19 +1,55 @@
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("Bot is running");
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Web server started");
+});
+
 require("dotenv").config();
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const axios = require("axios");
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
-
 const PUBG_API = "https://api.pubg.com/shards/steam";
 
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates
+  ]
+});
+
+// --------------------
+// STATE
+// --------------------
 let lastMatchId = null;
 
-async function checkPlayer() {
-  try {
+// --------------------
+// PUBG FETCH MATCH
+// --------------------
+async function fetchMatch(matchId) {
+  const res = await axios.get(
+    `${PUBG_API}/matches/${matchId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PUBG_API_KEY}`,
+        Accept: "application/vnd.api+json"
+      }
+    }
+  );
 
+  return res.data;
+}
+
+// --------------------
+// CHECK MATCH LOOP
+// --------------------
+async function checkMatch() {
+  try {
     const playerRes = await axios.get(
       `${PUBG_API}/players?filter[playerNames]=${process.env.PLAYER_NAME}`,
       {
@@ -25,60 +61,69 @@ async function checkPlayer() {
     );
 
     const player = playerRes.data.data[0];
+    const matchId = player.relationships.matches.data[0].id;
 
-    if (!player) return;
+    // no new match
+    if (matchId === lastMatchId) return;
 
-    const latestMatchId =
-      player.relationships.matches.data[0].id;
+    lastMatchId = matchId;
 
-    if (latestMatchId === lastMatchId) return;
+    const match = await fetchMatch(matchId);
 
-    lastMatchId = latestMatchId;
+    const included = match.included;
 
-    const matchRes = await axios.get(
-      `${PUBG_API}/matches/${latestMatchId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PUBG_API_KEY}`,
-          Accept: "application/vnd.api+json"
-        }
-      }
+    const me = included
+      .filter(x => x.type === "participant")
+      .find(p => p.attributes.stats.name === process.env.PLAYER_NAME)
+      ?.attributes.stats;
+
+    if (!me) return;
+
+    // ONLY WIN
+    if (me.winPlace !== 1) return;
+
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+
+    const member = guild.members.cache.find(
+      m => m.user.username === process.env.DISCORD_USERNAME
     );
 
-    const included = matchRes.data.included;
+    if (!member?.voice?.channel) return;
 
-    const participant = included.find(
-      x =>
-        x.type === "participant" &&
-        x.attributes.stats.name === process.env.PLAYER_NAME
+    const voiceChannel = member.voice.channel;
+
+    const mentions = voiceChannel.members
+      .map(m => `<@${m.id}>`)
+      .join(" ");
+
+    const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+
+    const mapName = match.data.attributes.mapName;
+    const duration = match.data.attributes.duration;
+
+    channel.send(
+      `🐔 **CHICKEN DINNER AUTO DETECTED!**\n\n` +
+      `🗺 Map: ${mapName}\n` +
+      `⏱ Duration: ${Math.floor(duration / 60)}m\n\n` +
+      `${mentions}\n\n` +
+      `💀 Kills: ${me.kills}\n` +
+      `💥 Damage: ${me.damageDealt}`
     );
-
-    if (!participant) return;
-
-    const stats = participant.attributes.stats;
-
-    if (stats.winPlace === 1) {
-
-      const channel = await client.channels.fetch(
-        process.env.CHANNEL_ID
-      );
-
-      channel.send(
-        `🐔 CHICKEN DINNER!\n` +
-        `🎮 ${stats.name}\n` +
-        `💀 Kills: ${stats.kills}`
-      );
-    }
 
   } catch (err) {
-    console.log(err.message);
+    console.log("Error:", err.message);
   }
 }
 
-client.once("clientReady", () => {
+// --------------------
+// START BOT
+// --------------------
+client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  setInterval(checkPlayer, 120000);
+  // run every 60 seconds
+  setInterval(checkMatch, 60000);
 });
 
 client.login(process.env.DISCORD_TOKEN);
